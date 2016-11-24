@@ -1,0 +1,2 @@
+Acquisition started at secs:1439840458 ticks:91078991
+Read 4000 samples from shot 1/1 secs:1439840458 ticks:91080916 (loop: 1)

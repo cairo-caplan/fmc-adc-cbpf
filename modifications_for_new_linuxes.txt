@@ -1,0 +1,82 @@
+Lack of strict_strtol on current kernels
+Inserção do seguinte código no início de sysfs.c do zio:
+
+#ifndef strict_strtol 
+	int (*strict_strtol)(const char *,unsigned int,long *) = kstrtol;
+#endif
+
+-------------------------------------------------------------
+
+implicit declaration of function ‘pci_enable_msi_block’ 
+On spec-sw/kernel/spec-pci.c:
+
+replace 
+int pci_enable_msi_block(struct pci_dev * dev,unsigned int nvec);
+with 
+int pci_enable_msi_exact(struct pci_dev *dev, int nvec):
+
+
+int pci_enable_msi_block(struct pci_dev * dev,unsigned int nvec){
+	if (nvec < INT_MAX)
+		return pci_enable_msi_exact(dev,int nvec);
+	else 
+		return -1;	
+}
+
+------------------------------------------
+
+spec-sw/kernel/wr-nic-gpio.c:95:6: error: void value not ignored as it ought to be
+  ret = gpiochip_remove(gc);
+
+gpiochip_remove doesn't return an errno from kervel version 3.18 onward
+
+Ugly solution:
+
+replace ret = gpiochip_remove(gc); with gpiochip_remove(gc); when kernel >= 3.18:
+
+
+
+#include <linux/version.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,18,0)
+	gpiochip_remove(gc);
+#else
+	ret = gpiochip_remove(gc);
+	if (ret)
+		dev_err(fmc->hwdev, "DANGER %i! gpio chip can't be removed\n",ret);
+#endif
+
+---------------------------------------------------------------------------------------
+Symbol WQ_NON_REENTRANT is useless now and is not available on new kernels 
+kernel/fa-core.c
+
+So replacing :
+
+fa_workqueue = alloc_workqueue(fa_dev_drv.driver.name,
+					WQ_NON_REENTRANT | WQ_UNBOUND |
+					WQ_MEM_RECLAIM, 1);
+
+with:
+
+fa_workqueue = alloc_workqueue(fa_dev_drv.driver.name,
+					WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
+
+
+--------------------------------------------------------------------------------------
+kernel/zio-helpers.c: In function ‘zio_dma_alloc_sg’:
+kernel/zio-helpers.c:115:10: warning: return makes pointer from integer without a cast [-Wint-conversion]
+
+replacing:
+
+if (unlikely(!chan || !hwdev || !blocks || !n_blocks))
+		return -EINVAL);
+
+for :
+
+if (unlikely(!chan || !hwdev || !blocks || !n_blocks))
+		return ERR_PTR(-EINVAL);
+
+
+
+
+

@@ -1,0 +1,35 @@
+
+Install Scientific Linux 6.6 (Carbon) for x86_64  systems fromn here :
+http://ftp.scientificlinux.org/linux/scientific/6.6/x86_64/iso/SL-66-x86_64-2014-11-09-LiveDVD.iso
+
+
+
+Copy the gateware files:
+
+As root:
+mkdir /lib/firmware/fmc/
+
+cp adc/binaries/spec-fmc-adc-v4.0.bin /lib/firmware/fmc/
+cp adc/binaries/spec-init.bin-2012-12-14 /lib/firmware/fmc/
+
+
+apt-get install git gnuplot root-system qt4-qmake apt-get install libqt4-dev
+
+
+Load the drivers:
+
+////////AS ROOT///////////////////
+cd /adc/
+./load_drivers.sh
+
+to unload:
+./unload_drivers.sh
+//////////////////////////////////
+
+
+cd ~
+git clone https://github.com/cairo-caplan/fmc-adc-gui.git
+cd fmc-adc-gui/
+qmake fmc-adc-gui.pro
+make
+./fmc-adc-gui

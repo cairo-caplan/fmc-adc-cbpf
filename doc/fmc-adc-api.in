@@ -1,0 +1,673 @@
+\input texinfo    @c -*-texinfo-*-
+%
+% fmc-adc-api.in - main file for the documentation
+%
+%%%%
+
+%------------------------------------------------------------------------------
+%
+%                         NOTE FOR THE UNAWARE USER
+%                         =========================
+%
+%    This file is a texinfo source. It isn't the binary file of some strange
+%    editor of mine. If you want ASCII, you should "make fmc-adc-api.txt".
+%
+%------------------------------------------------------------------------------
+
+%
+% This is not a conventional info file...
+% I use three extra features:
+%   - The '%' as a comment marker, if at beginning of line ("\%" -> "%")
+%   - leading blanks are allowed (this is something I can't live without)
+%   - braces are automatically escaped when they appear in example blocks
+%
+
+@comment %**start of header
+@documentlanguage en
+@documentencoding ISO-8859-1
+@setfilename fmc-adc-api.info
+@settitle fmc-adc-api
+@iftex
+@afourpaper
+@end iftex
+@paragraphindent none
+@comment %**end of header
+
+@setchapternewpage off
+
+@set update-month September 2014
+@set release __RELEASE_GIT_ID__
+
+@finalout
+
+@titlepage
+@title FMC ADC Programmer's Interface
+@subtitle @value{update-month} (@value{release})
+@subtitle A generic API for ADC devices
+@author CERN BE-CO-HT / Alessandro Rubini and others
+@end titlepage
+@headings single
+
+@c ##########################################################################
+@iftex
+@contents
+@end iftex
+
+@c ##########################################################################
+@node Top
+@top Introduction
+
+This is the documentation for the programmer's interface (API) that
+is expected to accompany most or all of the ADC cards being developed
+and used by the Controls grout at CERN.
+
+This design is the outcome of email discussion between Michel Arruat,
+David Cobas, Federico Vaga and Alessandro Rubini in March 2013.  Ideas
+have later been refined during real use.  Alessandro wrote this
+document.
+
+@c ##########################################################################
+@node Bugs and Missing Features
+@chapter Bugs and Missing Features
+
+To set the record straight, we'd better list the known issues right
+off at the start.  We are aware of the issues, but they are not fixed
+at this point in time.
+
+@itemize @bullet
+
+@item The ``parameters'' functions are not documented, although they
+are here to stay.
+
+@item The library should automatically choose the buffering options:
+for zio, buffer type and size adjustment. This is not implemented
+and users must do that by themselves (see the driver manual about how
+to do it).
+
+@item Internals are not documented, while we think some guidance in
+understanding the code is useful, in case users need to trace unexpected
+behaviours that may be library bugs or application bugs. Also,
+verbose mode exists but it not documented.
+
+@item Verbose mode is not verbose enough: @i{sysfs} accesses are only
+reported in case of error, while a complete trace of them is often
+useful to understand what is going on. Similarly, ``log to file''
+instead of ``verbose to stderr'' should be added as an option.
+
+@item Internally, a number of functions must be renamed, and a better
+split between api-generic, zio-generic and driver-specific code must
+be put in place.
+
+@item Some code parts, especially configuration, should be
+restructured to use data tables instead of open-coded conditionals.
+This is important for maintainance and easy addition of new boards.
+
+@item We need to add @i{reset_conf} and related functions, that
+are currently missing. Also, direct access to configuration structures
+inside the device structure should be provided.  The current API will
+remain, though, we plan to just add easier use cases.
+
+@end itemize
+
+@c ##########################################################################
+@node General Ideas and Rationale
+@chapter General Ideas and Rationale
+
+The API is meant to be as generic, so the same code can be run mostly
+unchanged with a variety of boards and driver types.  This is why
+the name used for headers and libraries is simply @i{fmc-adc}, without
+a card name in there -- the @i{fmc} prefix reflects the current situation
+where all foreseen cards in the group are in the FMC form factor, 
+
+The user, however, is expected to select the card being worked on, by
+means of a name and a @i{device ID}, which generally reflects the
+geographic placement of the card.
+
+@c ==========================================================================
+@node Buffers Overview
+@section Buffers
+
+Each acquisition run is relying on a buffer. The buffer includes both
+@i{data} and @i{metadata}.  The layout of data is depending on the
+card and its configuration; the metadata part depends on the type of
+driver currently running for the card.  For example, if the driver is
+based on the ZIO framework, the @i{metadata} part of the buffer refers
+to a ZIO control block.  The idea is that all information is available
+to the user, who can use it at will or ignore it and just use generic
+interfaces.
+
+Buffers are generally allocated by the library, but the application
+can provide its own allocator if it really wants to.  The reason for
+using library-driven allocation is that the library knows better. If,
+for example, the driver offers @i{mmap} support, the library can
+choose to map acquired data instead of calling @i{malloc}.  However,
+for the rare case where the application knows better, it can override
+this.  Also, the application should tell the number of buffers and
+expected data size at the beginning, so the library can properly
+configure the underlying driver, if this is needed.
+
+For ZIO drivers, you can use two buffer types: @i{kmalloc} and
+@i{vmalloc}.  Please check section @i{Buffers} in the
+@i{fmc-adc-driver} manual (discussion will be moved here as we
+finalize automatic setting of buffer features).
+
+@c ==========================================================================
+@node Configuration Overview
+@section Configuration
+
+Configuration is performed by passing parameters as 32-bit numbers.
+The library defines arrays of such parameters, one for each
+aspect of the overall problem (triggers, data, and so on).
+Each item in the array has a symbolic name, and each array is associated
+with a bitmask that specifies which parameters have been set.
+The choice of arrays is driven by the need for generic structures
+that can be used unchanged with different hardware cards.
+
+While there is a little overhead in parsing the generic structures,
+configuration is not something that happens in hot paths, and we see
+no problems in that.  Also, please note that setting the configuration
+and applying it are different steps, and the configuration data structures
+can be prepared and saved for later use. 
+
+@c ==========================================================================
+@node Implementation Status
+@section Implementation Status
+
+Currently the library is only implemented for the
+``FmcAdc100M14b4cha'' card, driven by a ZIO driver.  The API however
+will not change as we add new cards and drivers; we'll likely need a
+few new configuration items to match the specifics of the new cards,
+but this will work as long as you link the newer version of the library.
+
+@c ##########################################################################
+@node Error Reporting
+@chapter Error Reporting
+
+Each library function returns values according to standard @i{libc}
+conventions: -1 or NULL (for functions returning @t{int} or pointers,
+resp.)  is an error indication.  When error happens, the @t{errno}
+variable is set appropriately.
+
+@t{errno} values can be standard Posix items like @t{EINVAL}, or
+library-specific values, @t{FMCADC_ENOSET} (``Cannot set requested
+item'').  All library-specific error values have a value greater than
+1024, to prevent collision with standard values.  To convert
+such values to a string please use the function:
+
+@findex fmcadc_strerror
+@example
+char *fmcadc_strerror(int error);
+@end example
+
+The function returns static storage, so you can keep around the pointer
+it returns, if needed. Similarly, there is no concurrency between
+getting the string and using it, not even in multithreaded
+environments (@t{errno} itself is already protected, in this respect).
+
+@c ##########################################################################
+@node Initialization and Cleanup
+@chapter Initialization and Cleanup
+
+The library may keep internal information, so the application should
+call its initialization function.  After use, it should call the
+exit function to release internal data, but it is not mandatory to
+do that at program termination, because the operating system releases
+anything in any case -- the library doesn't leave unexpected files
+in persistent storage.
+
+@findex fmcadc_init
+@findex fmcadc_exit
+@example
+int fmcadc_init(void);
+void fmcadc_exit(void);
+@end example
+
+The functions don't do anything at this point, but they may be
+implemented in later releases.  For example, the library may scan the
+system and cache the list of peripheral cards found, to make
+later @i{open} calls faster.
+
+@c ##########################################################################
+@node Opening and Closing
+@chapter Opening and closing
+
+Each device must be opened before use, and it should be closed after
+use. It is not mandatory to close if the process is going to
+terminate, as the library has no persistent storage to clean up -- but
+there may be persistent buffer storage allocated, and @i{fmcadc_close}
+may release it in future versions.
+
+@findex fmcadc_open
+@findex fmcadc_open_by_lun
+@findex fmcadc_close
+@example
+fmcadc_dev *fmcadc_open(char *name, unsigned int dev_id,
+                        unsigned long totalsamples,
+                        unsigned int nbuffer,
+                        unsigned long flags)
+struct fmcadc_dev *fmcadc_open_by_lun(char *name, int lun,
+                                      unsigned long totalsamples,
+                                      unsigned int nbuffer,
+                                      unsigned long flags);
+extern int fmcadc_close(struct fmcadc_dev *dev);
+@end example
+
+This is the meaning of the various arguments:
+
+@table @code
+
+@item fmcadc_dev
+
+	The device is an opaque object for the user. It should be passed
+        around but not be looked into.
+
+@item name
+
+	Devices are opened by name, and the name for the only supported
+        card at the moment is ``@t{fmc-adc-100m14b4cha}''.
+
+@item dev_id
+
+	The device identifier is used to enumerate several cards in the
+        same system.  The number is usually dependent on the geographic
+        placement of the card (bus number, slot number).
+
+@item lun
+
+	Logical Unit Number. This number comes from a database description
+        of the system (@i{open_by_lun} is not currently implemented).
+
+@item totalsamples
+
+	This is a a hint about how big a buffer the application will use.
+        Managing big acquisitions (hundreds of megabytes, or gigabytes)
+        requires some pre-allocation of the data, and sometimes this
+        configuration happens at device level, so it's good to have
+        the information at open time. This is a number of samples,
+	i.e. @t{nshots * (presamples + postsamples)}, not a number of bytes.
+
+@item nbuffer
+
+	This is a hint about how many buffers are being used at the
+        same time by the application. For example, a multi-shot acquisition
+        requires all buffers to be available at the same time. Again, this
+        information may require device-level configuration at open time.
+
+@findex FMCADC_F_FLUSH
+@findex FMCADC_F_VERBOSE
+@item flags
+
+	This argument is used to pass user flags. The library currently
+        supports @t{FMCADC_F_FLUSH} (that reads and discards any
+        input samples possibly left over by a previous acquisition)
+        and @t{FMCADC_F_VERBOSE} (that enables diagnostic messages to
+        @i{stderr}).
+
+ currently unused, but some driver may need to
+        have some more information, or flags, at open time.
+
+@end table
+
+
+@c ##########################################################################
+@node Time Stamps
+@chapter Time Stamps
+
+The timestamp structrure is defined as follows:
+
+@smallexample
+struct fmcadc_timestamp {
+        uint64_t secs;
+        uint64_t ticks;
+        uint64_t bins;
+};
+@end smallexample
+
+This is the same structure as used by the ZIO framework, but it is not
+specific to ZIO -- the choice made there was just the best of breed,
+agreed upon in a discussion held within the HT section.
+
+Currently, timestamps are only used in association with buffers: after
+an acquisition is over and saved to a buffer, the user can ask for
+the timestamp of the acquired buffers. See @ref{Buffers}
+
+@c ##########################################################################
+@node Configuration
+@chapter Configuration
+
+Configuration is the most intensive part of the library, because
+there are a number of parameters that can be set or retrieved.
+
+Unfortunately, for lack of time on my side, it is not properly
+documented here.
+@c FIXME: document configuration
+
+Briefly, configuration is described by a few data structures. Each
+structure includes a ``type'' identifier, some internal fields
+and an array of configuration values.  A bitmask (in the structure
+itself) states which configuration values are active. All parameters
+are 32 bits wide; each structure includes 64 values.  The position
+of each parameter in the array is fixed, and as boards are added
+to this library we may need to add new values for unforeseen requirements.
+We don't expect to change the API, nor replace the meaning of the
+already-defined array members.
+
+Please check the header file to know the currently-defined parameters.
+
+The library offsers the following functions related to configuration:
+
+@smallexample
+void fmcadc_set_conf(struct fmcadc_conf *conf,
+                     unsigned int conf_index, uint32_t val);
+int fmcadc_get_conf(struct fmcadc_conf *conf,
+                    unsigned int conf_index,
+                    uint32_t *val);
+int fmcadc_reset_conf(struct fmcadc_dev *dev, unsigned int flags,
+                      struct fmcadc_conf *conf);
+int fmcadc_apply_config(struct fmcadc_dev *dev, unsigned int flags,
+                        struct fmcadc_conf *conf);
+int fmcadc_retrieve_config(struct fmcadc_dev *dev,
+                           struct fmcadc_conf *conf);
+@end smallexample
+
+@findex fmcadc_set_conf
+@findex fmcadc_get_conf
+The @i{set} and @i{get} functions access a single configuration element
+of the configuration structure. Please remember that there are several
+configuration structures, but indexes start from 0 for each of them --
+future revisions of this library may include a non-ambiguous naming,
+while still keeping the current API for compatibility.
+
+@findex fmcadc_reset_conf
+The @i{reset} function (which is not yet implemented)
+sets all items in the structure to the
+advertised default for the specific device (it can only be called
+after opening the device). Like the previous two, it is only concerned
+with data structures, and it makes no hardware access.
+
+@findex fmcadc_apply_config
+@findex fmcadc_retrieve_config
+The @i{apply} and @i{retrieve} functions talk with the device driver,
+to transfer active items of the configuration to the hardware.
+As mnemonic, you can keep in mind that the functions with the longer
+@t{config} name do more (talk with hardware), while those with the
+shorter name @t{conf} do less.
+
+@c ##########################################################################
+@node Acquisition
+@chapter Acquisition
+
+The library offers three functions related to acquisition:
+
+@smallexample
+int fmcadc_acq_start(struct fmcadc_dev *dev, unsigned int flags,
+                     struct timeval *timeout);
+int fmcadc_acq_poll(struct fmcadc_dev *dev, unsigned int flags,
+                     struct timeval *timeout);
+int fmcadc_acq_stop(struct fmcadc_dev *dev, unsigned int flags);
+@end smallexample
+
+@findex fmcadc_acq_start
+The @i{start} function tells hardware to start acquisition according
+to the current configuration (but starting in itself is usually a fast
+operation, because it doesn't rewrite configuration to the
+hardware, at least with currently supported boards). It can return
+immediately or wait for completion, with a timeout. The function supports
+@t{FMCADC_F_FLUSH}, to discard previous leftover data before activating
+the acquisition, if any is there.
+
+@findex fmcadc_acq_poll
+The @i{poll} function waits for acquisition to complete. Again, it
+can return immediately or wait. A return value of 0 means acquisition
+is over. For multi-shot we would like to return the number of
+still-missing shots, but this is not yet supported.
+
+@findex fmcadc_acq_stop
+The @i{stop} function stops an already-begun acquisition. It is not
+expected to be of frequent use.
+
+According to the low-level implementation, functions waiting for data
+(i.e. @i{start} when passed a timeout and @i{poll}) may fail with
+@t{FMCADC_EDISABLED} if the acquisition is externally disabled by
+other entities. ZIO supports that (since Nov 2013) by setting
+@t{POLLERR} when a user disables the trigger through a sysfs write.
+Other backends may offer their own notification means.
+
+This is the meaning of the arguments:
+
+@table @code
+
+@item dev
+
+	The device returned by a previous @t{fmcadc_open} call.
+
+@item flags
+
+	Flags to request special actions.
+        0 always selects the default behavior. Currently, the @i{start}
+        function supports @t{FMCADC_F_FLUSH} -- this is not
+        supported by the @i{poll} function, because after telling hardware
+        to start I/O we cannot safely discard ``old'' data.
+        Flags can be used for other things: for example, we
+        may soon define a flags to automatically enable a new acquisition
+        when the previous one is over, for stream-like applications.
+        (In that case after each successful @i{poll} the next call would
+        wait for another acquisition to be over).
+        
+@item timeout
+
+	The timeout is used like the argument for @i{select(2)}: if
+        NULL, the functions wait forever, otherwise they specify the
+        maximum allowed waiting time -- and passing zero values asks
+        to not wait at all.
+
+@end table
+
+@c ##########################################################################
+@node Buffers
+@chapter Buffers
+
+The buffer is a data structure. It includes data and metadata
+(but the format of metadata depends on the specific driver in charge
+of the hardware), as well as other informative fields:
+
+@smallexample
+struct fmcadc_buffer {
+        void *data;
+        void *metadata;
+        int samplesize;
+        int nsamples;
+        struct fmcadc_dev *dev;
+        unsigned long flags; /* internal to the library */
+        void *mapaddr;
+        unsigned long maplen;
+};
+@end smallexample
+
+The buffer is allocated and released by the library. The rationale is
+described in @ref{Buffers Overview}. the application is not allowed to
+pass its own buffer.  It is possible, however, for the application to
+override the allocation for data by passing a pointer to its own preferred
+allocator.
+
+The following functions are related to buffers:
+
+@smallexample
+struct fmcadc_buffer *fmcadc_request_buffer(struct fmcadc_dev *dev,
+                                            int nsamples,
+                                            void *(*alloc_fn)(size_t),
+                                            unsigned int flags);
+int fmcadc_fill_buffer(struct fmcadc_dev *dev,
+                       struct fmcadc_buffer *buf,
+                       unsigned int flags,
+                       struct timeval *timeout);
+struct fmcadc_timestamp *fmcadc_tstamp_buffer(struct fmcadc_buffer *buf,
+                                              struct fmcadc_timestamp *ts);
+int fmcadc_release_buffer(struct fmcadc_dev *dev,
+                          struct fmcadc_buffer *buf,
+                          void (*free_fn)(void *));
+@end smallexample
+
+@findex fmcadc_request_buffer
+The @t{request_buffer} function allocates an empty buffer and returns
+it to the user. It returns @t{NULL} on failure. The buffer is
+empty, and neither the @i{data} nor thr @i{metadata} can be accessed
+until the buffer is filled.
+
+@findex fmcadc_fill_buffer
+The @t{fill_buffer} function is run after an acquisition, and fills
+the buffer with the next available shot. The size of the buffer must
+be at least equal to the size of the shot; otherwise the result is
+undefined.  The function may fail with @t{FMCADC_EDISABLED} if the
+acquisition is externally disabled/aborted by other entities.
+
+@findex fmcadc_tstamp_buffer
+@t{tstamp_buffer} extracts the acquisition timestamp from the buffer,
+in a driver-specific way (most likely looking in the metadata structure).
+If the caller passes a @t{ts} pointer, the timestamp is copied into
+that pointer and the same pointer is returned. If @t{ts} is NULL,
+the function returns a pointer of its own choice, that is only valid
+until the buffer is released.
+
+@findex fmcadc_release_buffer
+The @t{release_buffer} function releases any resources associated with
+the buffer.
+
+This is the meaning of the various arguments, in the order in which
+they appear:
+
+@table @code
+
+@item dev
+
+	The device must be the result of an @t{fmcadc_open} call
+        (or @i{open_by_lun}).
+
+@item nsamples
+
+	The number of samples associated with this buffer (the size of
+        each sample is known by the device type). This is the total
+        number, so a 4-multiplexed acquisition of 10 samples requires 40
+        samples here.  If the application plans to run several
+        acquisitions (even of different sizes), it can allocate the buffers
+        beforehand. Thus, the driver can't know the @t{nsamples} value in
+        advance. The number of samples in the buffer may be bigger
+        than the number of samples that will actually be acquired later.
+
+@item alloc_fn
+
+	The pointer is usually expected to be NULL, as the driver knows
+        how to allocate the buffer.  However, if the pointer is not null,
+        the library will use it to allocate the data area of the buffer
+        (the buffer structure and the metadata are not allocated with
+        this function).
+
+@item flags
+
+	Currently unused, available for future special cases.
+
+@item buf
+
+	The buffer pointer, as returned by the allocation function.
+
+@item timeout
+
+	The timeout for filling the buffer is used like
+        the timeout in @i{select(2)}.
+        If NULL, there is no timeout, if set, it is used as a maximum waiting
+        time. If allocation times out, @t{NULL} is returned, with
+        @t{-ETIMEDOUT} as @i{errno}.
+
+@item ts
+
+	A pointer to timestamp, so the library can copy the timestamp
+        to user-provided storage.
+
+@item free_fn
+
+	If the data section of the buffer was allocated by a custom allocator,
+        this is the pointer to associated @i{free} function. The two function
+        pointers match the prototypes of @i{malloc} and @i{free}.
+
+@end table
+
+By accepting a user-defined allocator, we allow customized management
+of the data area in the most flexible way. The application may have
+special needs that are unforeseeable by the driver. In the simplest
+case, the application needs to send out or save the data with its own
+ancillary information: the custom allocator in this case can return
+the pointer inside the pre-built structure.  If the driver retrieves
+data using the @i{read} system call, this trick can save a data copy
+overall -- if the driver would see data through @i{mmap}, there is no
+saving in using the custom allocator but no additional cost, either.
+
+@c ##########################################################################
+@node Internals
+@chapter Internals
+
+To be documented in a later version.
+
+@c ##########################################################################
+@node Incompatibilities
+@chapter Incompatibilities
+
+During June 2013 we defined the final API as documented here. However,
+code written before June 28th may use the initial conventions, that are
+no more active. The current API is designed to be persistent over
+the years, and work with any ADC card belonging to the same family
+as our first board, the ``fmc-adc-100m14b4cha'' one.
+
+This is the list of incompatibilities. I list the commit, so you
+can see the actual change in @i{git} history if you are affected.
+
+@itemize @bullet
+
+@item Some configuration names changed. Now naming is consistent
+across all configuration macros. Change applied in commit 78a2ac0b.
+
+@item The data structures have 64 configuration items, not 32.
+This requires to use @t{long long} for the mask, but users are
+strongly encouraged to use the helpers @i{conf_set} and @i{conf_get}.
+Change applied in commit aa1eae16.
+
+@item Configuration functions use @t{conf} in their name, not
+@t{attr}. Change applied in commit 34c93097.
+
+@item The @i{fmcadc_strerror} function takes only the @t{errnum}
+argument, not @t{dev} any more. Applied in commit e83791de.
+
+@item Applications are asked to call @i{fmcadc_init} and @i{fmcadc_exit}
+(but the latter is optional at program termination).
+
+@item The open function states the number of shots and the total data
+size, so the library can prepare for the best allocation strategy.
+Applied in commit 6f3e4435.
+
+@item Buffer functions are different: the buffer is allocated by the
+library (not by the caller any more) and there is a new function to
+fill the buffer. Commit 3e83241e implements the prototype, but keeps
+the previous semantic; code and examples have been fixed later.
+
+@c FIXME: touches hardware or not? See description above
+@item A new @i{reset_conf} function exists, to force default values
+on all configuration variables. This can be used to prevent configuration
+leakage from the previous acquisition to the next. Resetting configuration
+is optional, so you can use a process to configure the card and another
+to acquire (I personally set range and gain before I run acquisition
+programs, for example).
+
+@item There is a new function to poll for acquisition. This is useful
+since the process may want to
+do something else while waiting for the trigger.
+
+@end itemize
+
+@c ##########################################################################
+@node Index
+@unnumbered Index
+
+@printindex fn
+
+@bye
+
+@c  LocalWords:  fmcadc struct timestamp bitmask conf config metadata

@@ -1,0 +1,59 @@
+
+Install Scientific Linux 6.6 (Carbon) for x86_64  systems fromn here :
+http://ftp.scientificlinux.org/linux/scientific/6.6/x86_64/iso/SL-66-x86_64-2014-11-09-LiveDVD.iso
+
+
+
+
+Find out Distro version, if it is correct
+cat /etc/issue
+
+The first Line shall be : "Scientific Linux release 6.6 (Carbon)"
+
+Install some extra repositories:
+
+
+yum install yumex
+yum install yum-conf-sl6x
+
+
+Install Scientific Linux RealTime kernel
+
+//Download the Scientific Linux "Messaging Realtime Grid" repository file
+
+wget http://linuxsoft.cern.ch/cern/mrg/slc6-mrg.repo -O /etc/yum.repos.d/slc6-mrg.repo
+
+yum groupinstall 'MRG Realtime'
+
+yum install kernel-rt-devel kernel-rt-devel kernel-rt-headers gnuplot
+
+restart PC (init 6)
+
+Copy the gateware files:
+
+////////AS ROOT///////////////////
+mkdir /lib/firmware/fmc/
+
+cp adc/binaries/spec-fmc-adc-v4.0.bin /lib/firmware/fmc/
+cp adc/binaries/spec-init.bin-2012-12-14 /lib/firmware/fmc/
+
+//////////////////////////////////
+
+Install CERN ROOT:
+
+Enable EPEL repository
+wget http://download.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
+rpm -ivh epel-release-6-8.noarch.rpm
+
+yum install root root-core root-fftw root-gui root-guibuilder
+
+
+Load the drivers:
+
+////////AS ROOT///////////////////
+cd /adc/
+./load_drivers.sh
+
+to unload:
+./unload_drivers.sh
+//////////////////////////////////

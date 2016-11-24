@@ -1,0 +1,87 @@
+#!/usr/bin/wish
+
+set base "/sys/bus/zio/devices/adc-100m14b-"
+
+# We trace the "v" (values) array to write to sysfs
+trace add variable v write doact
+
+proc doact {var element op} {
+    global v; # lazy me
+    global argv0 base
+
+    foreach "index channel what" [split $element :] {}
+
+    #puts "trace: $index $channel $var = \"$v($element)\""
+    set fname ${base}$index/cset0/ch${channel}-$what
+    if ![file writable $fname] {
+	puts stderr "$argv0: file \"$fname\" not writable"
+	return
+    }
+    puts "$v($element) > $fname"
+    set F [open $fname w]
+    puts $F $v($element)
+    close $F
+}
+
+# Create one window for each card
+proc onewin {dir index} {
+    global v base labels
+
+    set t [toplevel .$index]
+
+    foreach ch "1 2 3 4" {
+	set hwch [expr $ch - 1]
+	pack [set f [frame $t.f$ch]] -side left -expand true
+	pack [label $f.l -text "ch $ch"]
+	pack [scale $f.off -orient v -from 5000 -to -5000 -resolution 10 \
+		  -variable v($index:$hwch:offset)]
+	set v($index:$hwch:vref) 17
+	pack [radiobutton $f.100m -text "100mV" \
+		  -variable v($index:$hwch:vref) -value 35]
+	pack [radiobutton $f.1v -text "1V" \
+		  -variable v($index:$hwch:vref) -value 17]
+	pack [radiobutton $f.10v -text "10V" \
+		  -variable v($index:$hwch:vref) -value 69]
+	pack [checkbutton $f.r -text "term" \
+		  -variable v($index:$hwch:50ohm-term)]
+	pack [label $f.cur -text ""]
+	lappend labels $f.cur ${base}$index/cset0/chan${hwch}/current-value
+
+	if {$ch != 4} {
+	    pack [frame $t.sep$ch -width 4 -bg black] -side left -fill y
+	}
+	
+    }
+
+}
+
+
+set dirs [glob -nocomplain "${base}*"]
+
+if ![llength $dirs] {
+    puts stderr "$argv0: No matches for \"${base}*\""
+    exit 1
+}
+
+proc checkval {} {
+    global labels
+    foreach {l f} $labels {
+	# if we rmmodded, break out of this loop
+	if [catch {set F [open $f]}] break
+
+	set v [read -nonewline $F]
+	close $F
+	if {$v >= 32768} {
+	    set v [expr $v - 65536]
+	}
+	$l config -text $v
+    }
+    after 500 checkval
+}
+
+foreach dir $dirs {
+    regsub $base $dir "" index
+    onewin $dir $index
+    after 500 checkval
+}
+wm withdraw .
